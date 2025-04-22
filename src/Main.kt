@@ -1,5 +1,3 @@
-// Path: src/main/kotlin/com/utils/KotlinFileExtractor.kt
-
 package com.utils
 
 import java.io.File
@@ -9,18 +7,15 @@ import java.nio.file.Paths
 import java.nio.file.StandardCopyOption
 import kotlin.io.path.name
 import kotlin.io.path.relativeTo
-import kotlin.streams.toList
 
 /**
  * Utility to extract and copy all Kotlin source files from a project directory,
- * excluding build and test directories.
+ * excluding build, test, and git directories.
  *
  * This utility is particularly useful for:
+ * - Migrating code between divergent repositories
+ * - Creating clean backups without metadata
  * - Analyzing project structure
- * - Generating documentation
- * - Code auditing
- * - Migration tasks
- * - Creating filtered backups of source code
  */
 object KotlinFileExtractor {
 
@@ -30,7 +25,8 @@ object KotlinFileExtractor {
         "test",
         ".gradle",
         ".idea",
-        "generated"
+        "generated",
+        ".git"  // Also ignore Git metadata
     )
 
     /**
@@ -58,19 +54,38 @@ object KotlinFileExtractor {
     }
 
     /**
-     * Copies all Kotlin files to the destination directory, preserving the relative path structure.
+     * Copies all Kotlin files to a derived destination directory based on project name.
+     * If the destination directory exists, it will be deleted first.
      *
      * @param sourceDir The source directory containing Kotlin files
-     * @param destDir The destination directory to copy files to
      * @return Number of files copied
      */
-    fun copyKotlinFiles(sourceDir: String, destDir: String): Int {
+    fun copyKotlinFiles(sourceDir: String): Int {
         val sourcePath = Paths.get(sourceDir).toAbsolutePath().normalize()
-        val destPath = Paths.get(destDir).toAbsolutePath().normalize()
 
-        // Create destination directory if it doesn't exist
+        // Extract project name from the root directory
+        val projectName = sourcePath.fileName.toString()
+        val destDirName = "$projectName-files"
+        val destPath = sourcePath.parent.resolve(destDirName)
+
+        println("Source directory: $sourcePath")
+        println("Project name identified as: $projectName")
+        println("Destination directory: $destPath")
+
+        // Delete destination directory if it exists
+        if (Files.exists(destPath)) {
+            println("Destination directory already exists. Deleting...")
+            Files.walk(destPath)
+                .sorted(Comparator.reverseOrder())
+                .forEach { Files.delete(it) }
+            println("Deleted existing directory: $destPath")
+        }
+
+        // Create destination directory
         Files.createDirectories(destPath)
+        println("Created destination directory: $destPath")
 
+        // Extract and copy Kotlin files
         val kotlinFiles = extractKotlinFiles(sourceDir)
         var filesCopied = 0
 
@@ -123,10 +138,6 @@ object KotlinFileExtractor {
     fun printFileInfo(files: List<File>) {
         println("Found ${files.size} Kotlin files:")
 
-        files.forEach { file ->
-            println("- ${file.absolutePath}")
-        }
-
         // Group files by package
         val packageGroups = files.groupBy { file ->
             extractPackage(file)
@@ -157,22 +168,21 @@ object KotlinFileExtractor {
  * Main function to demonstrate usage of the KotlinFileExtractor.
  */
 fun main(args: Array<String>) {
-    if (args.size < 2) {
-        println("Usage: KotlinFileExtractor <sourceDir> <destDir>")
-        println("Example: KotlinFileExtractor ./myproject ./kotlin-files-backup")
+    if (args.isEmpty()) {
+        println("Usage: KotlinFileExtractor <sourceDir>")
+        println("Example: KotlinFileExtractor ./myproject")
         return
     }
 
-    val sourceDir = args[0]
-    val destDir = args[1]
+    val sourceDir = "args[0]"
 
     try {
         println("Scanning directory: $sourceDir")
         val kotlinFiles = KotlinFileExtractor.extractKotlinFiles(sourceDir)
         println("Found ${kotlinFiles.size} Kotlin files")
 
-        println("Copying files to: $destDir")
-        val filesCopied = KotlinFileExtractor.copyKotlinFiles(sourceDir, destDir)
+        println("Copying files to project-specific directory...")
+        val filesCopied = KotlinFileExtractor.copyKotlinFiles(sourceDir)
         println("Successfully copied $filesCopied Kotlin files")
 
         // Print additional statistics
@@ -180,5 +190,6 @@ fun main(args: Array<String>) {
         println("\nTotal lines of Kotlin code: $totalLines")
     } catch (e: Exception) {
         System.err.println("Error: ${e.message}")
+        e.printStackTrace()
     }
 }
