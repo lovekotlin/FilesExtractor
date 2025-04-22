@@ -54,18 +54,19 @@ object KotlinFileExtractor {
     }
 
     /**
-     * Copies all Kotlin files to a derived destination directory based on project name.
+     * Copies all Kotlin files to a single flat directory based on project name.
+     * Files will be renamed with package-based prefixes to avoid naming conflicts.
      * If the destination directory exists, it will be deleted first.
      *
      * @param sourceDir The source directory containing Kotlin files
      * @return Number of files copied
      */
-    fun copyKotlinFiles(sourceDir: String): Int {
+    fun copyKotlinFilesToFlatDirectory(sourceDir: String): Int {
         val sourcePath = Paths.get(sourceDir).toAbsolutePath().normalize()
 
         // Extract project name from the root directory
         val projectName = sourcePath.fileName.toString()
-        val destDirName = "$projectName-files"
+        val destDirName = "$projectName-flat-files"
         val destPath = sourcePath.parent.resolve(destDirName)
 
         println("Source directory: $sourcePath")
@@ -85,19 +86,39 @@ object KotlinFileExtractor {
         Files.createDirectories(destPath)
         println("Created destination directory: $destPath")
 
-        // Extract and copy Kotlin files
+        // Extract Kotlin files
         val kotlinFiles = extractKotlinFiles(sourceDir)
         var filesCopied = 0
 
+        // Map to track used filenames to avoid conflicts
+        val usedFilenames = mutableSetOf<String>()
+
         kotlinFiles.forEach { sourceFile ->
             try {
-                val relativePath = Paths.get(sourceFile.absolutePath).relativeTo(sourcePath)
-                val targetPath = destPath.resolve(relativePath)
+                // Get package name for prefixing
+                val packageName = extractPackage(sourceFile)
+                val packagePrefix = if (packageName != "No package") {
+                    packageName.replace('.', '_') + "_"
+                } else {
+                    ""
+                }
 
-                // Create parent directories if they don't exist
-                Files.createDirectories(targetPath.parent)
+                // Create a unique filename
+                var baseFilename = sourceFile.name
+                var targetFilename = packagePrefix + baseFilename
+                var counter = 1
 
-                // Copy the file
+                // Ensure filename uniqueness
+                while (targetFilename in usedFilenames) {
+                    targetFilename = "${packagePrefix}${baseFilename.removeSuffix(".kt")}_$counter.kt"
+                    counter++
+                }
+
+                usedFilenames.add(targetFilename)
+
+                // Copy the file to flat destination
+                val targetPath = destPath.resolve(targetFilename)
+
                 Files.copy(
                     sourceFile.toPath(),
                     targetPath,
@@ -105,6 +126,7 @@ object KotlinFileExtractor {
                 )
 
                 filesCopied++
+                println("Copied: ${sourceFile.name} -> $targetFilename")
             } catch (e: Exception) {
                 System.err.println("Failed to copy ${sourceFile.absolutePath}: ${e.message}")
             }
@@ -174,16 +196,16 @@ fun main(args: Array<String>) {
         return
     }
 
-    val sourceDir = "args[0]"
+    val sourceDir = args[0]
 
     try {
         println("Scanning directory: $sourceDir")
         val kotlinFiles = KotlinFileExtractor.extractKotlinFiles(sourceDir)
         println("Found ${kotlinFiles.size} Kotlin files")
 
-        println("Copying files to project-specific directory...")
-        val filesCopied = KotlinFileExtractor.copyKotlinFiles(sourceDir)
-        println("Successfully copied $filesCopied Kotlin files")
+        println("Copying files to a single flat directory...")
+        val filesCopied = KotlinFileExtractor.copyKotlinFilesToFlatDirectory(sourceDir)
+        println("Successfully copied $filesCopied Kotlin files to a flat structure")
 
         // Print additional statistics
         val totalLines = kotlinFiles.sumOf { it.readLines().size }
